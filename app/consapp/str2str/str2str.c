@@ -146,9 +146,9 @@ static void sigfunc(int sig)
 static void decodefmt(char *path, int *fmt)
 {
     char *p;
-    
+
     *fmt=-1;
-    
+
     if ((p=strrchr(path,'#'))) {
         if      (!strcmp(p,"#rtcm2")) *fmt=STRFMT_RTCM2;
         else if (!strcmp(p,"#rtcm3")) *fmt=STRFMT_RTCM3;
@@ -172,12 +172,12 @@ static void decodefmt(char *path, int *fmt)
 static int decodepath(const char *path, int *type, char *strpath, int *fmt)
 {
     char buff[1024],*p;
-    
+
     strcpy(buff,path);
-    
+
     /* decode format */
     decodefmt(buff,fmt);
-    
+
     /* decode type */
     if (!(p=strstr(buff,"://"))) {
         strcpy(strpath,buff);
@@ -294,7 +294,7 @@ int main(int argc, char **argv)
     int deamon=0;
     const char *msg = "1004,1019"; // Current messages.
     const char *msgs[MAXSTR];      // Messages per output stream.
-    
+
     for (i=0;i<MAXSTR;i++) {
         paths[i]=s1[i];
         logs[i]=s2[i];
@@ -356,7 +356,7 @@ int main(int argc, char **argv)
         else if (*argv[i]=='-') printhelp();
     }
     if (n<=0) n=1; /* stdout */
-    
+
     for (i=0;i<n;i++) {
         if (fmts[i+1]<=0) continue;
         if (fmts[i+1]!=STRFMT_RTCM3) {
@@ -388,20 +388,24 @@ int main(int argc, char **argv)
     if (deamon) deamonise();
     signal(SIGTERM,sigfunc);
     signal(SIGINT ,sigfunc);
+#ifdef SIGHUP
     signal(SIGHUP ,SIG_IGN);
+#endif
+#ifdef SIGPIPE
     signal(SIGPIPE,SIG_IGN);
-    
+#endif
+
     strsvrinit(&strsvr,n+1);
-    
+
     if (trlevel>0) {
         traceopen(*logfile?logfile:TRACEFILE);
         tracelevel(trlevel);
     }
     fprintf(stderr,"stream server start\n");
-    
+
     strsetdir(local);
     strsetproxy(proxy);
-    
+
     for (i=0;i<MAXSTR;i++) {
         if (*cmdfile[i]) readcmd(cmdfile[i],cmds[i], sizeof(cmd_strs[0]),0);
         if (*cmdfile[i]) readcmd(cmdfile[i],cmds_periodic[i], sizeof(cmd_periodic_strs[0]), 2);
@@ -413,10 +417,10 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     for (intrflg=0;!intrflg;) {
-        
+
         /* get stream server status */
         strsvrstat(&strsvr,stat,log_stat,byte,bps,strmsg);
-        
+
         /* show stream server status */
         for (i=0,p=buff;i<MAXSTR;i++) p+=sprintf(p,"%c",ss[stat[i]+1]);
 
@@ -424,7 +428,7 @@ int main(int argc, char **argv)
         time2str(utc2gpst(timeget()),tstr,0);
         fprintf(stderr,"%s [%s] %10d B %7d bps %s\n",
                 tstr,buff,byte[0],bps[0],strmsg);
-        
+
         sleepms(dispint);
     }
     for (i=0;i<MAXSTR;i++) {
@@ -432,7 +436,7 @@ int main(int argc, char **argv)
     }
     /* stop stream server */
     strsvrstop(&strsvr,(const char **)cmds);
-    
+
     for (i=0;i<n;i++) {
         strconvfree(conv[i]);
     }
