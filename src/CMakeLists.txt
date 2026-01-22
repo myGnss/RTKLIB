@@ -1,5 +1,5 @@
 include_directories(.)
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 
 if(WIN32)
   add_definitions(-DWIN_DLL)

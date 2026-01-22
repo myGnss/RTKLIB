@@ -1,44 +1,50 @@
 
 set(RTKLBI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 
+if(WIN32)
+set(DEPENDENCY m lapack blas wsock32 ws2_32 winmm)
+else()
+set(DEPENDENCY m lapack blas)
+endif()
+
 add_executable(t_matrix t_matrix.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_matrix m lapack blas)
+target_link_libraries(t_matrix ${DEPENDENCY})
 
 add_executable(t_time t_time.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_time m lapack blas)
+target_link_libraries(t_time ${DEPENDENCY})
 
 add_executable(t_coord t_coord.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/geoid.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_coord m lapack blas)
+target_link_libraries(t_coord ${DEPENDENCY})
 
 add_executable(t_rinex t_rinex.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/rinex.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_rinex m lapack blas)
+target_link_libraries(t_rinex ${DEPENDENCY})
 
 add_executable(t_lambda t_lambda.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/lambda.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_lambda m lapack blas)
+target_link_libraries(t_lambda ${DEPENDENCY})
 
 add_executable(t_atmos t_atmos.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_atmos m lapack blas)
+target_link_libraries(t_atmos ${DEPENDENCY})
 
 add_executable(t_misc t_misc.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_misc m lapack blas)
+target_link_libraries(t_misc ${DEPENDENCY})
 
 add_executable(t_preceph t_preceph.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c ${RTKLBI_DIR}/rinex.c ${RTKLBI_DIR}/ephemeris.c ${RTKLBI_DIR}/sbas.c)
-target_link_libraries(t_preceph m lapack blas)
+target_link_libraries(t_preceph ${DEPENDENCY})
 
 add_executable(t_gloeph t_gloeph.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/rinex.c ${RTKLBI_DIR}/ephemeris.c ${RTKLBI_DIR}/sbas.c ${RTKLBI_DIR}/preceph.c)
-target_link_libraries(t_gloeph m lapack blas)
+target_link_libraries(t_gloeph ${DEPENDENCY})
 
 add_executable(t_geoid t_geoid.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c ${RTKLBI_DIR}/geoid.c)
-target_link_libraries(t_geoid m lapack blas)
+target_link_libraries(t_geoid ${DEPENDENCY})
 
 add_executable(t_ppp t_ppp.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/ephemeris.c ${RTKLBI_DIR}/preceph.c ${RTKLBI_DIR}/sbas.c ${RTKLBI_DIR}/ionex.c ${RTKLBI_DIR}/pntpos.c ${RTKLBI_DIR}/ppp.c ${RTKLBI_DIR}/ppp_ar.c ${RTKLBI_DIR}/lambda.c ${RTKLBI_DIR}/tides.c)
-target_link_libraries(t_ppp m lapack blas)
+target_link_libraries(t_ppp ${DEPENDENCY})
 
 add_executable(t_ionex t_ionex.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/preceph.c ${RTKLBI_DIR}/ionex.c)
-target_link_libraries(t_ionex m lapack blas)
+target_link_libraries(t_ionex ${DEPENDENCY})
 
 add_executable(t_tle t_tle.c ${RTKLBI_DIR}/rtkcmn.c ${RTKLBI_DIR}/trace.c ${RTKLBI_DIR}/rinex.c ${RTKLBI_DIR}/ephemeris.c ${RTKLBI_DIR}/sbas.c ${RTKLBI_DIR}/preceph.c ${RTKLBI_DIR}/tle.c)
-target_link_libraries(t_tle m lapack blas)
+target_link_libraries(t_tle ${DEPENDENCY})
 
 
 add_test(NAME matrix_test COMMAND t_matrix WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

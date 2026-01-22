@@ -348,21 +348,100 @@ Solution Rtkrcv::get_sol() {
 
 bool Rtkrcv::is_running() const { return svr.state; }
 
-static void load_empharis(const char* file, nav_t& nav) {
+/**
+ * @brief 安全加载星历数据到 Server
+ * * 采用“中转法”：
+ * 1. 先读入临时 nav_t (允许动态内存分配，避免 readrnxt 破坏 server 内存布局)
+ * 2. 在临时内存中排序去重 (uniqnav)
+ * 3. 将有效数据精准填入 server_nav 的固定槽位中
+ * * @param file 星历文件路径
+ * @param server_nav 目标 Server 的导航数据结构 (引用传递)
+ */
+static void load_empharis(const char* file, nav_t& server_nav) {
+    assert(server_nav.eph);
+
+    // 1. 创建一个临时的 nav，用于读取文件
+    // 初始化为 0，readrnxt 会根据文件内容自动 malloc 内存
+    nav_t temp_nav = {0};
+
+    // 2. 读取文件到临时 nav (这里会作为动态列表处理)
+    trace(3, "Loading %s into temp storage...\n", file);
+
     gtime_t ts{0, 0.0};
     gtime_t te{0, 0.0};
-    sta_t   sta;
-    int     status = readrnxt(file, 0, ts, te, 0.0, "", nullptr, &nav, &sta);
-    if (status < 0) {
-        throw std::runtime_error(
-            std::format("Cannot load empharis from {}: error code {}", file, status));
-    } else if (status == 0) {
-        trace(3, "No empharis data in %s\n", file);
+    sta_t   sta = {0};  // 必须初始化，防止 readrnxt 读取垃圾栈内存
+
+    // 调用核心读取函数
+    int status = readrnxt(file, 0, ts, te, 0.0, "", nullptr, &temp_nav, &sta);
+
+    if (status <= 0) {
+        trace(2, "Warning: No ephemeris data loaded from %s (Code: %d)\n", file, status);
+        freenav(&temp_nav, 0xFF);
+        return;
     }
 
-    trace(3, "Load empharis success! from file %s. length %d\n", file, nav.n);
-    uniqnav(&nav);
-    trace(3, "Unique empharis length %d\n", nav.n);
+    // 3. 对临时数据去重和排序
+    // 这一步非常关键，它将 readrnxt 读取的杂乱数据整理好
+    uniqnav(&temp_nav);
+    trace(3, "Loaded %d unique eph records, %d unique geph records.\n", temp_nav.n, temp_nav.ng);
+
+    // 4. [关键步骤] 将临时数据映射到 Server 的“固定座位”上
+
+    // --- A. 处理通用星历 (GPS, GAL, QZS, BDS, IRN, SBS) ---
+    // RTKLIB 规则: eph 数组大小为 MAXSAT，索引为 sat - 1
+    for (int i = 0; i < temp_nav.n; i++) {
+        eph_t* src = &temp_nav.eph[i];
+        int    sat = src->sat;
+
+        // 边界检查：防止越界写入踩坏堆
+        if (sat > 0 && sat <= MAXSAT) {
+            // 深拷贝数据到 Server 的当前集合
+            // rtksvr 可能会维护多套星历，这里我们更新默认集合 (set 0)
+            server_nav.eph[sat - 1] = *src;
+        }
+    }
+
+    // --- B. 处理 GLONASS 星历 (geph) ---
+    // RTKLIB 规则: GLONASS 存储在 geph 数组中
+    // 索引通常基于 PRN (1~24)，而不是全局 SAT ID
+    if (temp_nav.ng > 0 && server_nav.geph) {
+        for (int i = 0; i < temp_nav.ng; i++) {
+            geph_t* src = &temp_nav.geph[i];
+            int     sat = src->sat;
+            int     prn;
+
+            // 获取卫星系统和 PRN
+            int sys = satsys(sat, &prn);
+
+            if (sys == SYS_GLO) {
+                // GLONASS 的 geph 数组大小通常是 NSATGLO
+                // 索引方式: prn - 1
+                // 注意：这里需要确保 prn 在合法范围内
+                if (prn > 0 && prn <= NSATGLO) {
+                    server_nav.geph[prn - 1] = *src;
+                } else {
+                    trace(2, "Warning: GLONASS PRN out of range: %d\n", prn);
+                }
+            }
+        }
+    }
+
+    // --- C. 处理 SBAS 长期星历 (seph) [可选] ---
+    // 仅当你的 RTKLIB 版本启用且使用了 seph 时需要
+    if (temp_nav.ns > 0 && server_nav.seph) {
+        for (int i = 0; i < temp_nav.ns; i++) {
+            seph_t* src = &temp_nav.seph[i];
+            int     sat = src->sat;
+            int     prn;
+            int     sys = satsys(sat, &prn);
+            if (sys == SYS_SBS && prn > 0 && prn <= NSATSBS) {
+                server_nav.seph[prn - 1] = *src;
+            }
+        }
+    }
+
+    trace(3, "Transfer to server nav complete.\n");
+    freenav(&temp_nav, 0xFF);
 }
 
 #ifndef NO_MAIN
@@ -380,7 +459,7 @@ int main() {
         std::signal(SIGTERM, handle_signal);
 
         while (!g_exit_flag) {
-            using namespace std::chrono_literals;
+            using namespace std::literals::chrono_literals;
             std::this_thread::sleep_for(500ms);
             std::cout << service.get_error();
         }
