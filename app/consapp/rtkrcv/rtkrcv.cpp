@@ -7,6 +7,7 @@
 #include <csignal>
 #include <exception>
 #include <format>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -357,8 +358,11 @@ bool Rtkrcv::is_running() const { return svr.state; }
  * * @param file 星历文件路径
  * @param server_nav 目标 Server 的导航数据结构 (引用传递)
  */
-static void load_empharis(const char* file, nav_t& server_nav) {
+void Rtkrcv::load_ephemeris(const char* file) {
+    nav_t& server_nav = svr.nav;
     assert(server_nav.eph);
+    assert(server_nav.geph);
+    assert(server_nav.seph);
 
     // 1. 创建一个临时的 nav，用于读取文件
     // 初始化为 0，readrnxt 会根据文件内容自动 malloc 内存
@@ -385,66 +389,53 @@ static void load_empharis(const char* file, nav_t& server_nav) {
     uniqnav(&temp_nav);
     trace(3, "Loaded %d unique eph records, %d unique geph records.\n", temp_nav.n, temp_nav.ng);
 
+    rtksvrlock(&svr);
+
     // 4. [关键步骤] 将临时数据映射到 Server 的“固定座位”上
 
     // --- A. 处理通用星历 (GPS, GAL, QZS, BDS, IRN, SBS) ---
     // RTKLIB 规则: eph 数组大小为 MAXSAT，索引为 sat - 1
-    for (int i = 0; i < temp_nav.n; i++) {
-        eph_t* src = &temp_nav.eph[i];
-        int    sat = src->sat;
-
-        // 边界检查：防止越界写入踩坏堆
-        if (sat > 0 && sat <= MAXSAT) {
-            // 深拷贝数据到 Server 的当前集合
-            // rtksvr 可能会维护多套星历，这里我们更新默认集合 (set 0)
-            server_nav.eph[sat - 1] = *src;
-        }
+    for (eph_t* src = temp_nav.eph; src < temp_nav.eph + temp_nav.n; src++) {
+        int sat = src->sat;
+        assert(sat > 0 && sat <= MAXSAT);
+        server_nav.eph[sat - 1] = *src;
     }
 
     // --- B. 处理 GLONASS 星历 (geph) ---
     // RTKLIB 规则: GLONASS 存储在 geph 数组中
     // 索引通常基于 PRN (1~24)，而不是全局 SAT ID
-    if (temp_nav.ng > 0 && server_nav.geph) {
-        for (int i = 0; i < temp_nav.ng; i++) {
-            geph_t* src = &temp_nav.geph[i];
-            int     sat = src->sat;
-            int     prn;
+    for (geph_t* src = temp_nav.geph; src < temp_nav.geph + temp_nav.ng; src++) {
+        int sat = src->sat;
+        int prn;
+        int sys = satsys(sat, &prn);  // 获取卫星系统和 PRN
+        assert(sys == SYS_GLO);
+        assert(prn > 0 && prn <= NSATGLO);
 
-            // 获取卫星系统和 PRN
-            int sys = satsys(sat, &prn);
-
-            if (sys == SYS_GLO) {
-                // GLONASS 的 geph 数组大小通常是 NSATGLO
-                // 索引方式: prn - 1
-                // 注意：这里需要确保 prn 在合法范围内
-                if (prn > 0 && prn <= NSATGLO) {
-                    server_nav.geph[prn - 1] = *src;
-                } else {
-                    trace(2, "Warning: GLONASS PRN out of range: %d\n", prn);
-                }
-            }
-        }
+        // GLONASS 的 geph 数组大小通常是 NSATGLO
+        // 索引方式: prn - 1
+        server_nav.geph[prn - 1] = *src;
     }
 
     // --- C. 处理 SBAS 长期星历 (seph) [可选] ---
     // 仅当你的 RTKLIB 版本启用且使用了 seph 时需要
-    if (temp_nav.ns > 0 && server_nav.seph) {
-        for (int i = 0; i < temp_nav.ns; i++) {
-            seph_t* src = &temp_nav.seph[i];
-            int     sat = src->sat;
-            int     prn;
-            int     sys = satsys(sat, &prn);
-            if (sys == SYS_SBS && prn > 0 && prn <= NSATSBS) {
-                server_nav.seph[prn - 1] = *src;
-            }
-        }
+    for (seph_t* src = temp_nav.seph; src < temp_nav.seph + temp_nav.ns; src++) {
+        int sat = src->sat;
+        int prn;
+        int sys = satsys(sat, &prn);  // 获取卫星系统和 PRN
+        assert(sys == SYS_SBS);
+        assert(prn > 0 && prn <= NSATSBS);
+        server_nav.seph[prn - 1] = *src;
     }
+
+    rtksvrunlock(&svr);
 
     trace(3, "Transfer to server nav complete.\n");
     freenav(&temp_nav, 0xFF);
 }
 
 #ifndef NO_MAIN
+using namespace std::literals::chrono_literals;
+
 static std::atomic<bool> g_exit_flag{false};
 
 static void handle_signal(int) { g_exit_flag = true; }
@@ -452,16 +443,44 @@ static void handle_signal(int) { g_exit_flag = true; }
 int main() {
     try {
         Rtkrcv service{"conf", "trace", 3};
-        load_empharis("empharis.nav", svr.nav);
+        service.load_ephemeris("ephemeris.nav");
         service.start();
 
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
 
+        auto       last_update     = std::chrono::steady_clock::now();
+        const auto update_interval = 10s;
+
+        // 用于管理后台线程的句柄
+        std::future<void> pending_update;
+
         while (!g_exit_flag) {
-            using namespace std::literals::chrono_literals;
-            std::this_thread::sleep_for(500ms);
+            std::this_thread::sleep_for(1s);
             std::cout << service.get_error();
+
+            auto now = std::chrono::steady_clock::now();
+            if (now - last_update >= update_interval) {
+                // 检查上一次更新是否还在运行，防止线程堆积
+                if (pending_update.valid() &&
+                    pending_update.wait_for(0ms) != std::future_status::ready) {
+                    std::cout << "[Warning] Previous update still in progress, skipping..."
+                              << std::endl;
+                } else {
+                    std::cout << "[Info] Triggering scheduled ephemeris update..." << std::endl;
+
+                    // 使用 async 启动异步任务，替代 detach 线程
+                    pending_update = std::async(std::launch::async, [&service]() {
+                        service.load_ephemeris("ephemeris.nav");
+                    });
+
+                    last_update = now;  // 重置计时器
+                }
+            }
+        }
+
+        if (pending_update.valid()) {
+            pending_update.wait_for(0s);
         }
 
         service.stop();

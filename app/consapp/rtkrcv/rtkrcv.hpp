@@ -48,4 +48,5 @@ class Rtkrcv {
     std::string        get_error();
     Solution           get_sol();
     [[nodiscard]] bool is_running() const;
+    void               load_ephemeris(const char* ephemeris_file);
 };
